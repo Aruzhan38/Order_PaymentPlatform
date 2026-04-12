@@ -1,13 +1,19 @@
 package main
 
 import (
-	"Order_PaymentPlatform/internal/repository"
-	httpTransport "Order_PaymentPlatform/internal/transport/http"
-	"Order_PaymentPlatform/internal/usecase"
 	"database/sql"
-	"github.com/gin-gonic/gin"
-	_ "github.com/lib/pq"
 	"log"
+	"net"
+	"os"
+	"payment-service/internal/repository"
+	"payment-service/internal/usecase"
+
+	_ "github.com/lib/pq"
+	"google.golang.org/grpc"
+
+	paymentpb "github.com/Aruzhan38/order-payment-generated/proto/payment"
+
+	grpcTransport "payment-service/internal/transport/grpc"
 )
 
 func main() {
@@ -26,14 +32,26 @@ func main() {
 
 	paymentRepo := repository.NewPaymentRepository(db)
 	paymentUC := usecase.NewPaymentUsecase(paymentRepo)
-	paymentHandler := httpTransport.NewPaymentHandler(paymentUC)
 
-	r := gin.Default()
+	grpcAddr := os.Getenv("PAYMENT_GRPC_ADDR")
+	if grpcAddr == "" {
+		grpcAddr = ":50051"
+	}
 
-	r.POST("/payments", paymentHandler.CreatePayment)
-	r.GET("/payments/:order_id", paymentHandler.GetPayment)
+	lis, err := net.Listen("tcp", grpcAddr)
+	if err != nil {
+		log.Fatal("failed to listen: ", err)
+	}
 
-	if err := r.Run(":8081"); err != nil {
-		log.Fatal(err)
+	grpcServer := grpc.NewServer()
+	paymentpb.RegisterPaymentServiceServer(
+		grpcServer,
+		grpcTransport.NewPaymentServer(paymentUC),
+	)
+
+	log.Println("Payment gRPC server running on", grpcAddr)
+
+	if err := grpcServer.Serve(lis); err != nil {
+		log.Fatal("failed to serve gRPC: ", err)
 	}
 }

@@ -1,9 +1,9 @@
 package repository
 
 import (
-	"Order_PaymentPlatform/internal/domain"
 	"context"
 	"database/sql"
+	"order-service/internal/domain"
 )
 
 type OrderRepository struct {

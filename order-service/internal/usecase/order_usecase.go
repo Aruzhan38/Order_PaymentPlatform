@@ -1,11 +1,13 @@
 package usecase
 
 import (
-	"Order_PaymentPlatform/internal/domain"
 	"context"
 	"errors"
-	"github.com/google/uuid"
 	"time"
+
+	"github.com/google/uuid"
+	"order-service/internal/domain"
+	"order-service/internal/stream"
 )
 
 type OrderRepository interface {
@@ -15,18 +17,24 @@ type OrderRepository interface {
 }
 
 type PaymentClient interface {
-	AuthorizePayment(ctx context.Context, orderID string, amount int64) (string, string, error)
+	ProcessPayment(orderID string, amount int64) (string, error)
 }
 
 type OrderUsecase struct {
 	repo          OrderRepository
-	PaymentClient PaymentClient
+	paymentClient PaymentClient
+	streamManager *stream.OrderStreamManager
 }
 
-func NewOrderUsecase(repo OrderRepository, paymentClient PaymentClient) *OrderUsecase {
+func NewOrderUsecase(
+	repo OrderRepository,
+	paymentClient PaymentClient,
+	streamManager *stream.OrderStreamManager,
+) *OrderUsecase {
 	return &OrderUsecase{
 		repo:          repo,
-		PaymentClient: paymentClient,
+		paymentClient: paymentClient,
+		streamManager: streamManager,
 	}
 }
 
@@ -47,22 +55,52 @@ func (u *OrderUsecase) CreateOrder(ctx context.Context, customerID, itemName str
 	if err := u.repo.Create(ctx, order); err != nil {
 		return nil, err
 	}
-	status, _, err := u.PaymentClient.AuthorizePayment(ctx, order.ID, order.Amount)
+
+	u.streamManager.Publish(stream.StatusUpdate{
+		OrderID: order.ID,
+		Status:  "Pending",
+		Message: "Order created",
+	})
+
+	status, err := u.paymentClient.ProcessPayment(order.ID, order.Amount)
 	if err != nil {
+		order.Status = "Failed"
 		_ = u.repo.UpdateStatus(ctx, order.ID, "Failed")
+
+		u.streamManager.Publish(stream.StatusUpdate{
+			OrderID: order.ID,
+			Status:  "Failed",
+			Message: "Payment service unavailable or request failed",
+		})
+
 		return nil, err
 	}
 
 	if status == "Authorized" {
 		order.Status = "Paid"
-		_ = u.repo.UpdateStatus(ctx, order.ID, "Paid")
+		if err := u.repo.UpdateStatus(ctx, order.ID, "Paid"); err != nil {
+			return nil, err
+		}
+
+		u.streamManager.Publish(stream.StatusUpdate{
+			OrderID: order.ID,
+			Status:  "Paid",
+			Message: "Payment authorized",
+		})
 	} else {
 		order.Status = "Failed"
-		_ = u.repo.UpdateStatus(ctx, order.ID, "Failed")
+		if err := u.repo.UpdateStatus(ctx, order.ID, "Failed"); err != nil {
+			return nil, err
+		}
+
+		u.streamManager.Publish(stream.StatusUpdate{
+			OrderID: order.ID,
+			Status:  "Failed",
+			Message: "Payment declined",
+		})
 	}
 
 	return order, nil
-
 }
 
 func (u *OrderUsecase) GetOrderByID(ctx context.Context, id string) (*domain.Order, error) {
@@ -84,5 +122,12 @@ func (u *OrderUsecase) CancelOrder(ctx context.Context, id string) (*domain.Orde
 	}
 
 	order.Status = "Cancelled"
+
+	u.streamManager.Publish(stream.StatusUpdate{
+		OrderID: order.ID,
+		Status:  "Cancelled",
+		Message: "Order cancelled",
+	})
+
 	return order, nil
 }

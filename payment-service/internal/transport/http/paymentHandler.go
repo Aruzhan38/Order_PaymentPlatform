@@ -1,10 +1,10 @@
 package http
 
 import (
-	"Order_PaymentPlatform/internal/usecase"
 	"database/sql"
 	"github.com/gin-gonic/gin"
 	nethttp "net/http"
+	"payment-service/internal/usecase"
 )
 
 type PaymentHandler struct {

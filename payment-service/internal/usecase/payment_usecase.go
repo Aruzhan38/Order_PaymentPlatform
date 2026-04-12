@@ -1,10 +1,10 @@
 package usecase
 
 import (
-	"Order_PaymentPlatform/internal/domain"
 	"context"
 	"errors"
 	"github.com/google/uuid"
+	"payment-service/internal/domain"
 )
 
 type PaymentRepository interface {
