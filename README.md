@@ -8,6 +8,7 @@ And each of them has its own db and communicates via HTTP (request/response)
 
 Architecture
 
+
 Order Service - managing orders
 Payment Service - payment authorization
 
