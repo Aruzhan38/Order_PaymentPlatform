@@ -8,7 +8,6 @@ And each of them has its own db and communicates via HTTP (request/response)
 
 Architecture
 
-
 Order Service - managing orders
 Payment Service - payment authorization
 
@@ -84,5 +83,6 @@ API Examples
 }
 
 Diagram
+yes
 
 <img alt="img_4.png" height="300" src="img_4.png" width="350"/>
