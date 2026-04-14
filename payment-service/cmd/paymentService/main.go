@@ -5,15 +5,14 @@ import (
 	"log"
 	"net"
 	"os"
-	"payment-service/internal/repository"
-	"payment-service/internal/usecase"
 
 	_ "github.com/lib/pq"
 	"google.golang.org/grpc"
 
 	paymentpb "github.com/Aruzhan38/order-payment-generated/proto/payment"
-
+	"payment-service/internal/repository"
 	grpcTransport "payment-service/internal/transport/grpc"
+	"payment-service/internal/usecase"
 )
 
 func main() {

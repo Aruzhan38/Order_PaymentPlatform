@@ -86,3 +86,34 @@ Diagram
 yes
 
 <img alt="img_4.png" height="300" src="img_4.png" width="350"/>
+
+Assignment 2
+
+This project implements a microservice architecture using gRPC for communication between Order and Payment services.
+
+
+Proto definitions:
+- https://github.com/Aruzhan38/order-payment-protos
+
+Generated code:
+- https://github.com/Aruzhan38/order-payment-generated
+
+
+How to run:
+1. Clone repositories
+2. Start Payment Service:
+   go run cmd/payment/main.go
+
+3. Start Order Service:
+   go run cmd/order/main.go
+
+4. Set environment variables:
+   PAYMENT_GRPC_ADDR=localhost:50051
+
+Generate protobuf
+protoc --go_out=. --go-grpc_out=. --proto_path=. order/order.proto payment/payment.proto
+
+Diagram
+
+<img alt="img_5.png" height="300" src="img_5.png" width="400"/>
+
