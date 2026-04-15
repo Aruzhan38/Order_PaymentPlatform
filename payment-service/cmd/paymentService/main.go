@@ -1,17 +1,35 @@
 package main
 
 import (
-	"Order_PaymentPlatform/internal/repository"
-	httpTransport "Order_PaymentPlatform/internal/transport/http"
-	"Order_PaymentPlatform/internal/usecase"
 	"database/sql"
-	"github.com/gin-gonic/gin"
-	_ "github.com/lib/pq"
 	"log"
+	"net"
+	"os"
+
+	paymentpb "github.com/Aruzhan38/order-payment-generated/proto/payment"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
+	"google.golang.org/grpc"
+
+	"payment-service/internal/repository"
+	grpcTransport "payment-service/internal/transport/grpc"
+	"payment-service/internal/usecase"
 )
 
 func main() {
-	dsn := "host=localhost port=5432 user=postgres password=0000 dbname=payment_db sslmode=disable"
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found")
+	}
+
+	dsn := os.Getenv("PAYMENT_DB_DSN")
+	if dsn == "" {
+		log.Fatal("PAYMENT_DB_DSN is not set")
+	}
+
+	grpcAddr := os.Getenv("PAYMENT_GRPC_ADDR")
+	if grpcAddr == "" {
+		log.Fatal("PAYMENT_GRPC_ADDR is not set")
+	}
 
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -26,14 +44,23 @@ func main() {
 
 	paymentRepo := repository.NewPaymentRepository(db)
 	paymentUC := usecase.NewPaymentUsecase(paymentRepo)
-	paymentHandler := httpTransport.NewPaymentHandler(paymentUC)
 
-	r := gin.Default()
+	lis, err := net.Listen("tcp", grpcAddr)
+	if err != nil {
+		log.Fatal("failed to listen: ", err)
+	}
 
-	r.POST("/payments", paymentHandler.CreatePayment)
-	r.GET("/payments/:order_id", paymentHandler.GetPayment)
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(grpcTransport.LoggingInterceptor),
+	)
+	paymentpb.RegisterPaymentServiceServer(
+		grpcServer,
+		grpcTransport.NewPaymentServer(paymentUC),
+	)
 
-	if err := r.Run(":8081"); err != nil {
-		log.Fatal(err)
+	log.Println("Payment gRPC server running on", grpcAddr)
+
+	if err := grpcServer.Serve(lis); err != nil {
+		log.Fatal("failed to serve gRPC: ", err)
 	}
 }

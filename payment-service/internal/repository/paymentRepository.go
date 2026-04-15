@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"Order_PaymentPlatform/internal/domain"
+	"payment-service/internal/domain"
 )
 
 type PaymentRepository struct {
