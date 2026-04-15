@@ -6,17 +6,30 @@ import (
 	"net"
 	"os"
 
+	paymentpb "github.com/Aruzhan38/order-payment-generated/proto/payment"
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"google.golang.org/grpc"
 
-	paymentpb "github.com/Aruzhan38/order-payment-generated/proto/payment"
 	"payment-service/internal/repository"
 	grpcTransport "payment-service/internal/transport/grpc"
 	"payment-service/internal/usecase"
 )
 
 func main() {
-	dsn := "host=localhost port=5432 user=postgres password=0000 dbname=payment_db sslmode=disable"
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found")
+	}
+
+	dsn := os.Getenv("PAYMENT_DB_DSN")
+	if dsn == "" {
+		log.Fatal("PAYMENT_DB_DSN is not set")
+	}
+
+	grpcAddr := os.Getenv("PAYMENT_GRPC_ADDR")
+	if grpcAddr == "" {
+		log.Fatal("PAYMENT_GRPC_ADDR is not set")
+	}
 
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -32,17 +45,14 @@ func main() {
 	paymentRepo := repository.NewPaymentRepository(db)
 	paymentUC := usecase.NewPaymentUsecase(paymentRepo)
 
-	grpcAddr := os.Getenv("PAYMENT_GRPC_ADDR")
-	if grpcAddr == "" {
-		grpcAddr = ":50051"
-	}
-
 	lis, err := net.Listen("tcp", grpcAddr)
 	if err != nil {
 		log.Fatal("failed to listen: ", err)
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(grpcTransport.LoggingInterceptor),
+	)
 	paymentpb.RegisterPaymentServiceServer(
 		grpcServer,
 		grpcTransport.NewPaymentServer(paymentUC),

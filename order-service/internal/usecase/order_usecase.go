@@ -64,8 +64,11 @@ func (u *OrderUsecase) CreateOrder(ctx context.Context, customerID, itemName str
 
 	status, err := u.paymentClient.ProcessPayment(order.ID, order.Amount)
 	if err != nil {
+		if err := u.repo.UpdateStatus(ctx, order.ID, "Failed"); err != nil {
+			return nil, err
+		}
+
 		order.Status = "Failed"
-		_ = u.repo.UpdateStatus(ctx, order.ID, "Failed")
 
 		u.streamManager.Publish(stream.StatusUpdate{
 			OrderID: order.ID,
@@ -77,10 +80,11 @@ func (u *OrderUsecase) CreateOrder(ctx context.Context, customerID, itemName str
 	}
 
 	if status == "Authorized" {
-		order.Status = "Paid"
 		if err := u.repo.UpdateStatus(ctx, order.ID, "Paid"); err != nil {
 			return nil, err
 		}
+
+		order.Status = "Paid"
 
 		u.streamManager.Publish(stream.StatusUpdate{
 			OrderID: order.ID,
@@ -88,10 +92,11 @@ func (u *OrderUsecase) CreateOrder(ctx context.Context, customerID, itemName str
 			Message: "Payment authorized",
 		})
 	} else {
-		order.Status = "Failed"
 		if err := u.repo.UpdateStatus(ctx, order.ID, "Failed"); err != nil {
 			return nil, err
 		}
+
+		order.Status = "Failed"
 
 		u.streamManager.Publish(stream.StatusUpdate{
 			OrderID: order.ID,
