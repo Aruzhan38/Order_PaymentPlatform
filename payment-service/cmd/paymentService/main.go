@@ -2,15 +2,13 @@ package main
 
 import (
 	"database/sql"
-	"log"
-	"net"
-	"os"
-
 	paymentpb "github.com/Aruzhan38/order-payment-generated/proto/payment"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"google.golang.org/grpc"
-
+	"log"
+	"net"
+	"os"
 	"payment-service/internal/repository"
 	grpcTransport "payment-service/internal/transport/grpc"
 	"payment-service/internal/usecase"

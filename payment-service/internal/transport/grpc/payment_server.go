@@ -2,11 +2,10 @@ package grpc
 
 import (
 	"context"
-	"log"
-
 	paymentpb "github.com/Aruzhan38/order-payment-generated/proto/payment"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"log"
 	"payment-service/internal/usecase"
 )
 
@@ -31,14 +30,29 @@ func (s *PaymentServer) ProcessPayment(ctx context.Context, req *paymentpb.Payme
 
 	payment, err := s.uc.CreatePayment(ctx, req.OrderId, req.Amount)
 	if err != nil {
-		log.Printf("failed to process payment: %v", err)
 		return nil, status.Error(codes.Internal, "failed to process payment")
 	}
-
-	log.Printf("Payment processed: status=%s transaction_id=%s", payment.Status, payment.TransactionID)
 
 	return &paymentpb.PaymentResponse{
 		Status:        payment.Status,
 		TransactionId: payment.TransactionID,
+	}, nil
+}
+
+func (s *PaymentServer) GetPaymentStats(
+	ctx context.Context,
+	req *paymentpb.GetPaymentStatsRequest,
+) (*paymentpb.PaymentStats, error) {
+
+	total, authorized, declined, amount, err := s.uc.GetStats(ctx)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "failed to get stats")
+	}
+
+	return &paymentpb.PaymentStats{
+		TotalCount:      total,
+		AuthorizedCount: authorized,
+		DeclinedCount:   declined,
+		TotalAmount:     amount,
 	}, nil
 }

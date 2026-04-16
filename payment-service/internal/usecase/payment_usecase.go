@@ -10,6 +10,7 @@ import (
 type PaymentRepository interface {
 	Create(ctx context.Context, payment *domain.Payment) error
 	GetByOrderID(ctx context.Context, orderID string) (*domain.Payment, error)
+	GetStats(ctx context.Context) (int64, int64, int64, int64, error)
 }
 
 type PaymentUsecase struct {
@@ -53,4 +54,8 @@ func (u *PaymentUsecase) CreatePayment(ctx context.Context, orderID string, amou
 
 func (u *PaymentUsecase) GetPaymentByOrderID(ctx context.Context, orderID string) (*domain.Payment, error) {
 	return u.repo.GetByOrderID(ctx, orderID)
+}
+
+func (u *PaymentUsecase) GetStats(ctx context.Context) (int64, int64, int64, int64, error) {
+	return u.repo.GetStats(ctx)
 }
