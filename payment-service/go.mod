@@ -44,4 +44,6 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/Aruzhan38/order-payment-generated => ../order-payment-generated
+require github.com/Aruzhan38/order-payment-generated v0.0.0
+
+replace github.com/Aruzhan38/order-payment-generated => ../../order-payment-generated

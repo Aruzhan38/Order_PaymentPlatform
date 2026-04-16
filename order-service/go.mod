@@ -2,10 +2,11 @@ module order-service
 
 go 1.25.5
 
-replace github.com/Aruzhan38/order-payment-generated => ../order-payment-generated
+require github.com/Aruzhan38/order-payment-generated v0.0.0
+
+replace github.com/Aruzhan38/order-payment-generated => ../../order-payment-generated
 
 require (
-	github.com/Aruzhan38/order-payment-generated v0.0.0-00010101000000-000000000000
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.12.1
