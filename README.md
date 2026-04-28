@@ -192,3 +192,44 @@ A unary interceptor is implemented in the Payment Service to log:
 - method name
 - request duration
 - error status
+
+### Assignment 3
+
+![img_7.png](img_7.png)
+
+# Event-Driven Architecture Overview
+
+This project implements an event-driven system using three microservices:
+
+- Order Service (REST) – handles client requests
+- Payment Service (gRPC) – processes payments
+- Notification Service (Consumer) – listens for events and sends notifications
+
+### Flow:
+
+Client → Order Service → Payment Service → RabbitMQ → Notification Service
+## Idempotency Strategy
+
+To avoid duplicate processing, the Notification Service tracks processed messages using a map of event_id.
+
+- If a message was already processed → it is ignored
+- If not → it is processed and stored
+
+This ensures safe handling of duplicate deliveries.
+
+## ACK / NACK Logic
+
+Manual acknowledgments are used:
+
+- autoAck = false
+- Ack is called only after successful processing
+- On failure, Nack(false, false) is used
+
+This sends failed messages to the Dead Letter Queue (DLQ).
+
+## Dead Letter Queue (DLQ)
+Main queue: payment.completed
+DLQ: payment.completed.dlq
+
+- If a message fails to process, it is routed to the DLQ.
+- Failure is simulated for demonstration purposes.
