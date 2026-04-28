@@ -13,13 +13,18 @@ type PaymentRepository interface {
 	GetStats(ctx context.Context) (int64, int64, int64, int64, error)
 }
 
+type EventPublisher interface {
+	PublishPaymentCompleted(ctx context.Context, orderID string, amount int64, customerEmail string, status string) error
+}
 type PaymentUsecase struct {
-	repo PaymentRepository
+	repo      PaymentRepository
+	publisher EventPublisher
 }
 
-func NewPaymentUsecase(repo PaymentRepository) *PaymentUsecase {
+func NewPaymentUsecase(repo PaymentRepository, publisher EventPublisher) *PaymentUsecase {
 	return &PaymentUsecase{
-		repo: repo,
+		repo:      repo,
+		publisher: publisher,
 	}
 }
 
@@ -47,6 +52,20 @@ func (u *PaymentUsecase) CreatePayment(ctx context.Context, orderID string, amou
 
 	if err := u.repo.Create(ctx, payment); err != nil {
 		return nil, err
+	}
+
+	if status == "Authorized" && u.publisher != nil {
+		customerEmail := "user@example.com"
+
+		if err := u.publisher.PublishPaymentCompleted(
+			ctx,
+			payment.OrderID,
+			payment.Amount,
+			customerEmail,
+			payment.Status,
+		); err != nil {
+			return nil, err
+		}
 	}
 
 	return payment, nil

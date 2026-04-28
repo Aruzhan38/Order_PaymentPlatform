@@ -2,15 +2,15 @@ package main
 
 import (
 	"database/sql"
-	"log"
-	"net"
-	"os"
-
 	orderpb "github.com/Aruzhan38/order-payment-generated/proto/order"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"google.golang.org/grpc"
+	"log"
+	"net"
+	"os"
+	"time"
 
 	"order-service/internal/clients"
 	"order-service/internal/repository"
@@ -45,16 +45,28 @@ func main() {
 		log.Fatal("ORDER_HTTP_ADDR is not set")
 	}
 
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		log.Fatal("failed to connect to database:", err)
-	}
+	var db *sql.DB
 
-	if err := db.Ping(); err != nil {
-		log.Fatal("database not reachable:", err)
-	}
+	for i := 0; i < 10; i++ {
+		var err error
 
-	log.Println("Connected to PostgreSQL")
+		db, err = sql.Open("postgres", dsn)
+		if err == nil {
+			err = db.Ping()
+		}
+
+		if err == nil {
+			log.Println("Connected to PostgreSQL")
+			break
+		}
+
+		log.Println("Waiting for PostgreSQL...")
+		time.Sleep(2 * time.Second)
+
+		if i == 9 {
+			log.Fatal("database not reachable:", err)
+		}
+	}
 
 	orderRepo := repository.NewOrderRepository(db)
 

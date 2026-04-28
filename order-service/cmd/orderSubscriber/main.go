@@ -22,7 +22,7 @@ func main() {
 	}
 
 	if len(os.Args) < 2 {
-		log.Fatal("usage: go run cmd/orderSubscriber/main.go <order_id>")
+		log.Fatal("usage: go run cmd/orderSubscriber/main.go <order id>")
 	}
 	orderID := os.Args[1]
 

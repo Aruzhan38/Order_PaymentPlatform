@@ -9,9 +9,11 @@ import (
 	"log"
 	"net"
 	"os"
+	"payment-service/internal/messaging"
 	"payment-service/internal/repository"
 	grpcTransport "payment-service/internal/transport/grpc"
 	"payment-service/internal/usecase"
+	"time"
 )
 
 func main() {
@@ -29,19 +31,61 @@ func main() {
 		log.Fatal("PAYMENT_GRPC_ADDR is not set")
 	}
 
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		log.Fatal("failed to connect to database: ", err)
+	rabbitURL := os.Getenv("RABBITMQ_URL")
+	if rabbitURL == "" {
+		log.Fatal("RABBITMQ_URL is not set")
 	}
 
-	if err := db.Ping(); err != nil {
-		log.Fatal("database not reachable: ", err)
+	queueName := os.Getenv("PAYMENT_EVENTS_QUEUE")
+	if queueName == "" {
+		log.Fatal("PAYMENT_EVENTS_QUEUE is not set")
 	}
 
-	log.Println("Connected to PostgreSQL")
+	var db *sql.DB
+
+	for i := 0; i < 10; i++ {
+		var err error
+
+		db, err = sql.Open("postgres", dsn)
+		if err == nil {
+			err = db.Ping()
+		}
+
+		if err == nil {
+			log.Println("Connected to PostgreSQL")
+			break
+		}
+
+		log.Println("Waiting for PostgreSQL...")
+		time.Sleep(2 * time.Second)
+
+		if i == 9 {
+			log.Fatal("database not reachable: ", err)
+		}
+	}
+
+	var publisher *messaging.RabbitMQPublisher
+
+	for i := 0; i < 15; i++ {
+		var err error
+
+		publisher, err = messaging.NewRabbitMQPublisher(rabbitURL, queueName)
+		if err == nil {
+			log.Println("Connected to RabbitMQ")
+			break
+		}
+
+		log.Println("Waiting for RabbitMQ...")
+		time.Sleep(2 * time.Second)
+
+		if i == 14 {
+			log.Fatal("failed to connect to RabbitMQ: ", err)
+		}
+	}
+	defer publisher.Close()
 
 	paymentRepo := repository.NewPaymentRepository(db)
-	paymentUC := usecase.NewPaymentUsecase(paymentRepo)
+	paymentUC := usecase.NewPaymentUsecase(paymentRepo, publisher)
 
 	lis, err := net.Listen("tcp", grpcAddr)
 	if err != nil {
