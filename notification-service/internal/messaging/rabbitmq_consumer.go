@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"sync"
+	"time"
+
+	"notification-service/internal/provider"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -19,16 +21,30 @@ type PaymentCompletedEvent struct {
 	CreatedAt     string `json:"created_at"`
 }
 
+type IdempotencyStore interface {
+	IsProcessed(ctx context.Context, key string) (bool, error)
+	MarkProcessed(ctx context.Context, key string, ttl time.Duration) error
+}
+
 type RabbitMQConsumer struct {
 	conn      *amqp.Connection
 	ch        *amqp.Channel
 	queueName string
 
-	mu        sync.Mutex
-	processed map[string]bool
+	emailSender      provider.EmailSender
+	idempotencyStore IdempotencyStore
+	maxRetries       int
+	processedTTL     time.Duration
 }
 
-func NewRabbitMQConsumer(url, queueName string) (*RabbitMQConsumer, error) {
+func NewRabbitMQConsumer(
+	url string,
+	queueName string,
+	emailSender provider.EmailSender,
+	idempotencyStore IdempotencyStore,
+	maxRetries int,
+	processedTTL time.Duration,
+) (*RabbitMQConsumer, error) {
 	conn, err := amqp.Dial(url)
 	if err != nil {
 		return nil, err
@@ -74,10 +90,13 @@ func NewRabbitMQConsumer(url, queueName string) (*RabbitMQConsumer, error) {
 	}
 
 	return &RabbitMQConsumer{
-		conn:      conn,
-		ch:        ch,
-		queueName: queueName,
-		processed: make(map[string]bool),
+		conn:             conn,
+		ch:               ch,
+		queueName:        queueName,
+		emailSender:      emailSender,
+		idempotencyStore: idempotencyStore,
+		maxRetries:       maxRetries,
+		processedTTL:     processedTTL,
 	}, nil
 }
 
@@ -108,7 +127,7 @@ func (c *RabbitMQConsumer) Start(ctx context.Context) error {
 				return nil
 			}
 
-			if err := c.handleMessage(msg); err != nil {
+			if err := c.handleMessage(ctx, msg); err != nil {
 				log.Printf("failed to process message: %v", err)
 
 				if nackErr := msg.Nack(false, false); nackErr != nil {
@@ -124,25 +143,44 @@ func (c *RabbitMQConsumer) Start(ctx context.Context) error {
 	}
 }
 
-func (c *RabbitMQConsumer) handleMessage(msg amqp.Delivery) error {
+func (c *RabbitMQConsumer) handleMessage(ctx context.Context, msg amqp.Delivery) error {
 	var event PaymentCompletedEvent
 
 	if err := json.Unmarshal(msg.Body, &event); err != nil {
 		return err
 	}
 
+	idempotencyKey := fmt.Sprintf("notification:processed:%s", event.EventID)
+
+	processed, err := c.idempotencyStore.IsProcessed(ctx, idempotencyKey)
+	if err != nil {
+		return err
+	}
+
+	if processed {
+		log.Printf("[Notification] Duplicate event ignored: event_id=%s", event.EventID)
+		return nil
+	}
+
 	if event.Amount == 10000 {
 		return fmt.Errorf("simulated permanent error for DLQ")
 	}
 
-	c.mu.Lock()
-	if c.processed[event.EventID] {
-		c.mu.Unlock()
-		log.Printf("[Notification] Duplicate event ignored: event_id=%s", event.EventID)
-		return nil
+	subject := "Payment completed"
+	body := fmt.Sprintf(
+		"Your payment for order %s was completed. Amount: %.2f Status: %s",
+		event.OrderID,
+		float64(event.Amount)/100,
+		event.Status,
+	)
+
+	if err := c.sendWithRetry(ctx, event.CustomerEmail, subject, body); err != nil {
+		return err
 	}
-	c.processed[event.EventID] = true
-	c.mu.Unlock()
+
+	if err := c.idempotencyStore.MarkProcessed(ctx, idempotencyKey, c.processedTTL); err != nil {
+		return err
+	}
 
 	log.Printf(
 		"[Notification] Sent email to %s for Order #%s. Amount: %.2f Status: %s",
@@ -153,6 +191,30 @@ func (c *RabbitMQConsumer) handleMessage(msg amqp.Delivery) error {
 	)
 
 	return nil
+}
+
+func (c *RabbitMQConsumer) sendWithRetry(ctx context.Context, to string, subject string, body string) error {
+	var lastErr error
+
+	for attempt := 1; attempt <= c.maxRetries; attempt++ {
+		err := c.emailSender.Send(ctx, to, subject, body)
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+
+		backoff := time.Duration(1<<attempt) * time.Second
+		log.Printf("email send failed: attempt=%d backoff=%s error=%v", attempt, backoff, err)
+
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	return fmt.Errorf("email sending failed after %d retries: %w", c.maxRetries, lastErr)
 }
 
 func (c *RabbitMQConsumer) Close() {

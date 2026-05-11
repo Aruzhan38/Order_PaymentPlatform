@@ -2,7 +2,10 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,21 +23,33 @@ type PaymentClient interface {
 	ProcessPayment(orderID string, amount int64) (string, error)
 }
 
+type OrderCache interface {
+	Get(ctx context.Context, key string) (string, error)
+	Set(ctx context.Context, key string, value string, ttl time.Duration) error
+	Delete(ctx context.Context, key string) error
+}
+
 type OrderUsecase struct {
 	repo          OrderRepository
 	paymentClient PaymentClient
 	streamManager *stream.OrderStreamManager
+	cache         OrderCache
+	cacheTTL      time.Duration
 }
 
 func NewOrderUsecase(
 	repo OrderRepository,
 	paymentClient PaymentClient,
 	streamManager *stream.OrderStreamManager,
+	cache OrderCache,
+	cacheTTL time.Duration,
 ) *OrderUsecase {
 	return &OrderUsecase{
 		repo:          repo,
 		paymentClient: paymentClient,
 		streamManager: streamManager,
+		cache:         cache,
+		cacheTTL:      cacheTTL,
 	}
 }
 
@@ -86,6 +101,10 @@ func (u *OrderUsecase) CreateOrder(ctx context.Context, customerID, itemName str
 
 		order.Status = "Paid"
 
+		if u.cache != nil {
+			_ = u.cache.Delete(ctx, fmt.Sprintf("order:%s", order.ID))
+		}
+
 		u.streamManager.Publish(stream.StatusUpdate{
 			OrderID: order.ID,
 			Status:  "Paid",
@@ -98,6 +117,10 @@ func (u *OrderUsecase) CreateOrder(ctx context.Context, customerID, itemName str
 
 		order.Status = "Failed"
 
+		if u.cache != nil {
+			_ = u.cache.Delete(ctx, fmt.Sprintf("order:%s", order.ID))
+		}
+
 		u.streamManager.Publish(stream.StatusUpdate{
 			OrderID: order.ID,
 			Status:  "Failed",
@@ -109,7 +132,34 @@ func (u *OrderUsecase) CreateOrder(ctx context.Context, customerID, itemName str
 }
 
 func (u *OrderUsecase) GetOrderByID(ctx context.Context, id string) (*domain.Order, error) {
-	return u.repo.GetByID(ctx, id)
+	cacheKey := fmt.Sprintf("order:%s", id)
+
+	if u.cache != nil {
+		cachedOrder, err := u.cache.Get(ctx, cacheKey)
+		if err == nil && cachedOrder != "" {
+			log.Println("CACHE HIT")
+			var order domain.Order
+			if err := json.Unmarshal([]byte(cachedOrder), &order); err == nil {
+				return &order, nil
+			}
+		}
+
+		log.Println("CACHE MISS")
+	}
+
+	order, err := u.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if u.cache != nil {
+		orderJSON, err := json.Marshal(order)
+		if err == nil {
+			_ = u.cache.Set(ctx, cacheKey, string(orderJSON), u.cacheTTL)
+		}
+	}
+
+	return order, nil
 }
 
 func (u *OrderUsecase) CancelOrder(ctx context.Context, id string) (*domain.Order, error) {
@@ -134,5 +184,8 @@ func (u *OrderUsecase) CancelOrder(ctx context.Context, id string) (*domain.Orde
 		Message: "Order cancelled",
 	})
 
+	if u.cache != nil {
+		_ = u.cache.Delete(ctx, fmt.Sprintf("order:%s", id))
+	}
 	return order, nil
 }

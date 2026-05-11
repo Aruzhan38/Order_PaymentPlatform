@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	orderpb "github.com/Aruzhan38/order-payment-generated/proto/order"
 	"github.com/gin-gonic/gin"
@@ -10,8 +11,10 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"time"
 
+	"order-service/internal/cache"
 	"order-service/internal/clients"
 	"order-service/internal/repository"
 	"order-service/internal/stream"
@@ -68,6 +71,28 @@ func main() {
 		}
 	}
 
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		log.Fatal("REDIS_ADDR is not set")
+	}
+
+	redisClient := cache.NewRedisClient(redisAddr)
+
+	for i := 0; i < 10; i++ {
+		err := redisClient.Ping(context.Background())
+		if err == nil {
+			log.Println("Connected to Redis")
+			break
+		}
+
+		log.Println("Waiting for Redis...")
+		time.Sleep(2 * time.Second)
+
+		if i == 9 {
+			log.Fatal("failed to connect to Redis:", err)
+		}
+	}
+
 	orderRepo := repository.NewOrderRepository(db)
 
 	paymentClient, err := clients.NewPaymentClient(paymentGrpcAddr)
@@ -78,7 +103,25 @@ func main() {
 
 	streamManager := stream.NewOrderStreamManager()
 
-	orderUC := usecase.NewOrderUsecase(orderRepo, paymentClient, streamManager)
+	cacheTTLSeconds := 300
+
+	cacheTTLFromEnv := os.Getenv("CACHE_TTL_SECONDS")
+	if cacheTTLFromEnv != "" {
+		parsedTTL, err := strconv.Atoi(cacheTTLFromEnv)
+		if err != nil {
+			log.Fatal("invalid CACHE_TTL_SECONDS:", err)
+		}
+		cacheTTLSeconds = parsedTTL
+	}
+
+	orderUC := usecase.NewOrderUsecase(
+		orderRepo,
+		paymentClient,
+		streamManager,
+		redisClient,
+		time.Duration(cacheTTLSeconds)*time.Second,
+	)
+
 	orderHandler := httpTransport.NewOrderHandler(orderUC)
 	orderGrpcServer := grpcTransport.NewOrderServer(streamManager)
 
@@ -98,7 +141,13 @@ func main() {
 		}
 	}()
 
+	rateLimit := 10
+	rateLimitWindow := time.Minute
+
 	r := gin.Default()
+
+	r.Use(httpTransport.RateLimiter(redisClient.Client, rateLimit, rateLimitWindow))
+
 	r.POST("/orders", orderHandler.CreateOrder)
 	r.GET("/orders/:id", orderHandler.GetOrder)
 	r.PATCH("/orders/:id/cancel", orderHandler.CancelOrder)

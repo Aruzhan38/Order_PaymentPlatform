@@ -233,3 +233,28 @@ DLQ: payment.completed.dlq
 
 - If a message fails to process, it is routed to the DLQ.
 - Failure is simulated for demonstration purposes.
+
+![img_8.png](img_8.png)
+
+### Cache Invalidation Strategy
+
+The Order Service uses the cache-aside pattern.
+When GET /orders/:id is called, the service first checks Redis. If the order is not found, it loads the order from PostgreSQL and stores it in Redis with TTL.
+
+When an order status changes in PostgreSQL, the Redis cache key is deleted:
+
+order:<order_id>
+
+This prevents stale data from being returned.
+
+### Retry Logic
+
+The Notification Service works as a background worker. It consumes payment events from RabbitMQ and sends notifications through an EmailSender adapter.
+
+If the simulated email provider fails, the worker retries the job using exponential backoff:
+
+attempt 1 -> wait 2s
+attempt 2 -> wait 4s
+attempt 3 -> wait 8s
+
+After successful sending, the event ID is stored in Redis to prevent duplicate notifications.
