@@ -127,18 +127,20 @@ func (c *RabbitMQConsumer) Start(ctx context.Context) error {
 				return nil
 			}
 
-			if err := c.handleMessage(ctx, msg); err != nil {
-				log.Printf("failed to process message: %v", err)
+			go func(delivery amqp.Delivery) {
+				if err := c.handleMessage(ctx, delivery); err != nil {
+					log.Printf("failed to process message: %v", err)
 
-				if nackErr := msg.Nack(false, false); nackErr != nil {
-					log.Printf("failed to nack message: %v", nackErr)
+					if nackErr := delivery.Nack(false, false); nackErr != nil {
+						log.Printf("failed to nack message: %v", nackErr)
+					}
+					return
 				}
-				continue
-			}
 
-			if err := msg.Ack(false); err != nil {
-				log.Printf("failed to ack message: %v", err)
-			}
+				if err := delivery.Ack(false); err != nil {
+					log.Printf("failed to ack message: %v", err)
+				}
+			}(msg)
 		}
 	}
 }
@@ -174,7 +176,7 @@ func (c *RabbitMQConsumer) handleMessage(ctx context.Context, msg amqp.Delivery)
 		event.Status,
 	)
 
-	if err := c.sendWithRetry(ctx, event.CustomerEmail, subject, body); err != nil {
+	if err := c.sendWithRetry(ctx, event.OrderID, event.EventID, event.CustomerEmail, subject, body); err != nil {
 		return err
 	}
 
@@ -193,7 +195,7 @@ func (c *RabbitMQConsumer) handleMessage(ctx context.Context, msg amqp.Delivery)
 	return nil
 }
 
-func (c *RabbitMQConsumer) sendWithRetry(ctx context.Context, to string, subject string, body string) error {
+func (c *RabbitMQConsumer) sendWithRetry(ctx context.Context, orderID string, eventID string, to string, subject string, body string) error {
 	var lastErr error
 
 	for attempt := 1; attempt <= c.maxRetries; attempt++ {
@@ -205,7 +207,14 @@ func (c *RabbitMQConsumer) sendWithRetry(ctx context.Context, to string, subject
 		lastErr = err
 
 		backoff := time.Duration(1<<attempt) * time.Second
-		log.Printf("email send failed: attempt=%d backoff=%s error=%v", attempt, backoff, err)
+		log.Printf(
+			"email send failed: order_id=%s event_id=%s attempt=%d backoff=%s error=%v",
+			orderID,
+			eventID,
+			attempt,
+			backoff,
+			err,
+		)
 
 		select {
 		case <-time.After(backoff):

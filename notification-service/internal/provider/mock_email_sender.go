@@ -17,7 +17,7 @@ func NewMockEmailSender() *MockEmailSender {
 func (m *MockEmailSender) Send(ctx context.Context, to string, subject string, body string) error {
 	time.Sleep(1 * time.Second)
 
-	if rand.Intn(4) == 0 {
+	if rand.Intn(10) < 8 {
 		return errors.New("simulated email provider failure")
 	}
 

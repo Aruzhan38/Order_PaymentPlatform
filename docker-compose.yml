@@ -70,5 +70,5 @@ services:
       PAYMENT_EVENTS_QUEUE: payment.completed
       REDIS_ADDR: redis:6379
       PROVIDER_MODE: SIMULATED
-      MAX_RETRIES: 3
+      MAX_RETRIES: 5
       PROCESSED_TTL_SECONDS: 3600
